@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "Lilt",
+    "slug": "lilt",
+    "description": "An unofficial, ad-free YouTube Music player with synced lyrics.",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "android": { "package": "com.example.lilt" },
+    "plugins": [
+      ["expo-build-properties", { "android": { "minSdkVersion": 24 } }]
+    ]
+  }
+}
