@@ -63,21 +63,44 @@ export async function searchAll(q) {
 }
 
 // ---------- stream URL (resolved right before playback; URLs expire) ----------
-export async function resolveTrack(t) {
-  if (!t.yt) return t; // already has a url
+// YouTube now answers LOGIN_REQUIRED ("not a bot") unless the request carries a
+// visitorData token issued by YouTube itself, so we grab one from a watch page.
+const WEB_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+let vdP = null, vdAt = 0;
+const visitor = (id, force) => {
+  if (force || !vdP || Date.now() - vdAt > 10 * 60 * 1000) {
+    vdAt = Date.now();
+    vdP = (async () => {
+      const r = await fetch(`https://www.youtube.com/watch?v=${id}`, { headers: { 'User-Agent': WEB_UA, 'Accept-Language': 'en-US,en;q=0.9' } });
+      const m = (await r.text()).match(/"visitorData":"([^"]+)"/);
+      if (!m) throw new Error('could not start a YouTube session');
+      return m[1];
+    })();
+    vdP.catch(() => { vdP = null; });
+  }
+  return vdP;
+};
+
+const callPlayer = async (videoId, vd) => {
   const r = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'User-Agent': UA, 'X-YouTube-Client-Name': '28', 'X-YouTube-Client-Version': VR_VERSION },
+    headers: { 'Content-Type': 'application/json', 'User-Agent': UA, 'X-Goog-Visitor-Id': vd, 'X-YouTube-Client-Name': '28', 'X-YouTube-Client-Version': VR_VERSION },
     body: JSON.stringify({
-      videoId: t.id, contentCheckOk: true, racyCheckOk: true,
-      context: { client: { clientName: 'ANDROID_VR', clientVersion: VR_VERSION, deviceMake: 'Oculus', deviceModel: 'Quest 3', osName: 'Android', osVersion: '12', androidSdkVersion: 32, hl: 'en', timeZone: 'UTC', utcOffsetMinutes: 0 } },
+      videoId, contentCheckOk: true, racyCheckOk: true,
+      context: { client: { clientName: 'ANDROID_VR', clientVersion: VR_VERSION, deviceMake: 'Oculus', deviceModel: 'Quest 3', osName: 'Android', osVersion: '12', androidSdkVersion: 32, hl: 'en', timeZone: 'UTC', utcOffsetMinutes: 0, visitorData: vd } },
     }),
   });
-  const d = await r.json();
+  return r.json();
+};
+
+export async function resolveTrack(t) {
+  if (!t.yt) return t; // already has a url
+  let d = await callPlayer(t.id, await visitor(t.id));
+  if (d.playabilityStatus?.status === 'LOGIN_REQUIRED') d = await callPlayer(t.id, await visitor(t.id, true));
   const fmts = (d.streamingData?.adaptiveFormats || []).filter((f) => f.mimeType?.startsWith('audio/') && f.url);
-  if (!fmts.length) throw new Error(d.playabilityStatus?.reason || 'no stream');
-  const best = (list) => list.sort((a, b) => b.bitrate - a.bitrate)[0];
-  const f = best(fmts.filter((x) => x.mimeType.includes('mp4a'))) || best(fmts);
+  if (!fmts.length) throw new Error(`${d.playabilityStatus?.status || 'NO_STREAM'}: ${d.playabilityStatus?.reason || 'no audio stream returned'}`);
+  const best = (list) => [...list].sort((a, b) => b.bitrate - a.bitrate)[0];
+  const f = fmts.find((x) => x.itag === 140) || best(fmts.filter((x) => x.mimeType.includes('mp4a'))) || best(fmts);
   return { ...t, url: f.url, userAgent: UA, headers: { 'User-Agent': UA } };
 }
 

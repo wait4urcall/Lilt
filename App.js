@@ -84,8 +84,9 @@ export default function App() {
   const play = async (list, i = 0) => {
     // Resolve stream URLs for the next few songs right before playing (they expire).
     const picked = list.slice(i, i + 8);
-    const out = (await Promise.all(picked.map((t) => resolveTrack(t).catch(() => null)))).filter(Boolean);
-    if (!out.length) return Alert.alert("Couldn't load that song", 'YouTube refused the request. Try another track, or check your connection.');
+    let err = '';
+    const out = (await Promise.all(picked.map((t) => resolveTrack(t).catch((e) => { err = e.message; return null; })))).filter(Boolean);
+    if (!out.length) return Alert.alert("Couldn't load that song", err || 'YouTube refused the request.');
     await TrackPlayer.reset(); await TrackPlayer.add(out); await TrackPlayer.play();
   };
   const isLiked = (t) => liked.some((x) => x.id === t.id);
